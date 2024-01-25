@@ -92,6 +92,7 @@ function midiToSequence(contents) {
 
       sequences.push(sequence);
       sequence = [];
+      timeCounter = 0;
     }
   }
 

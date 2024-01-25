@@ -1,11 +1,12 @@
-const { setTimeout: setTimeoutAsync } = require("node:timers/promises");
 const { readFile } = require("node:fs/promises");
 
 const mc = require("minecraft-protocol");
 
 const { midiToSequence } = require("./midi");
 
-const MIDI_NOTE_TO_NOTEBLOCK = [6, 7, 8, 9, 10, 11, 0, 1, 2, 3, 4, 5];
+const { SequencePlayer } = require("./sequence");
+
+const { CommandProcessor } = require("./commands");
 
 function __noteblock(i) {
   return {
@@ -15,39 +16,9 @@ function __noteblock(i) {
   };
 }
 
-function octaveTranspose(previous, octave) {
-  if (octave !== previous[1]) {
-    previous[0] = previous[1];
-    previous[1] = octave;
-  }
-
-  return previous[1] > previous[0];
-}
-
-setTimeout(async () => {
-  const song = midiToSequence(await readFile(process.env.MIDI_FILE))[0];
-
-  const previous = Uint8Array.from([13, 13]);
-
-  for (let i = 0; i < song.length; i += 2) {
-    if (song[i] > 0) {
-      await setTimeoutAsync(song[i]);
-    }
-
-    let noteblock = 0;
-
-    const midiNote = song[i + 1] % 12;
-    const octave = Math.floor(song[i + 1] / 12);
-
-    const high = octaveTranspose(previous, octave);
-
-    noteblock = MIDI_NOTE_TO_NOTEBLOCK[midiNote] + (high ? 12 : 0);
-
-    if (midiNote === 6 && high) noteblock = 24;
-
-    hit(client, __noteblock(noteblock));
-  }
-}, 4000);
+const player = new SequencePlayer({
+  hit: (noteblock) => hit(client, __noteblock(noteblock)),
+});
 
 const client = mc.createClient({
   host: process.env.SERVER_HOST,
@@ -67,11 +38,39 @@ function hit(client, location) {
   });
 }
 
-client.on("packet", function (packet, meta) {
-  if (meta.name === "position") {
+function msg(client, message) {
+  client.write("chat", {
+    message,
+  });
+}
+
+client.on("packet", async function (packet, meta) {
+  if (meta.name === "chat") {
     console.log(meta);
     console.log(packet);
-    // currentPosition = packet;
+
+    if (packet.sender === "00000000-0000-0000-0000-000000000000") return;
+
+    const message = JSON.parse(packet.message);
+
+    const text = message.with.at(-1).text;
+
+    console.log(text);
+
+    const m1 = text.match(/^\.play (.*)/);
+
+    if (m1) {
+      const sequences = midiToSequence(await readFile(m1[1] + ".mid"));
+      player.playSequences(sequences);
+      msg(client, "Now playing");
+    }
+
+    const m2 = text.match(/^\.stop/);
+
+    if (m2) {
+      player.stop();
+      msg(client, "Stopped");
+    }
   }
 });
 
